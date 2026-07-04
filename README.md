@@ -10,7 +10,7 @@ When running an AI agent inside a Guest VM that connects to a Host MCP server vi
 
 ```bash
 # Typical setup without mcpsocat
-socat UNIX-CONNECT:/path/to/mcp.sock STDIO
+socat STDIO UNIX-CONNECT:/path/to/mcp.sock
 ```
 
 If the Host MCP server restarts or the connection drops, `socat` exits. Even if it reconnects, the MCP protocol requires the client to send an `initialize` request for the server to accept new operations. Standard `socat` is just a byte pipe and doesn't understand this.
