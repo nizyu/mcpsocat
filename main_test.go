@@ -97,13 +97,16 @@ func TestProxySessionRecovery(t *testing.T) {
 	}
 	defer l2.Close()
 
-	// サーバー2で再接続を受け入れ
+	// サーバー2で再接続を受け入れ（タイムアウト付き）
+	l2.(*net.UnixListener).SetDeadline(time.Now().Add(5 * time.Second))
 	conn2, err := l2.Accept()
 	if err != nil {
-		t.Fatalf("Failed to accept server 2: %v", err)
+		t.Fatalf("Timeout waiting for reconnection to server 2: %v", err)
 	}
 	defer conn2.Close()
 
+	// 読み取り操作にタイムアウトを設定
+	conn2.SetDeadline(time.Now().Add(5 * time.Second))
 	scanner2 := bufio.NewScanner(conn2)
 
 	// 最初に来るメッセージは、キャッシュされた initialize の再送のはず
@@ -115,23 +118,31 @@ func TestProxySessionRecovery(t *testing.T) {
 		t.Log("Server 2 received re-sent initialize successfully.")
 		// initialize レスポンスを返す（プロキシがハンドシェイクを完了するために必要）
 		conn2.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}` + "\n"))
+	} else {
+		t.Fatalf("Timeout or error reading initialize from server 2: %v", scanner2.Err())
 	}
 
 	// 次に来るメッセージは、キャッシュされた initialized 通知の再送のはず
+	conn2.SetDeadline(time.Now().Add(5 * time.Second))
 	if scanner2.Scan() {
 		msg := scanner2.Text()
 		if !strings.Contains(msg, "notifications/initialized") {
 			t.Fatalf("Expected re-sent initialized notification, got: %s", msg)
 		}
 		t.Log("Server 2 received re-sent initialized notification successfully.")
+	} else {
+		t.Fatalf("Timeout or error reading initialized from server 2: %v", scanner2.Err())
 	}
 
 	// その次に来るメッセージは、切断中にバッファリングされていた normalMsg のはず
+	conn2.SetDeadline(time.Now().Add(5 * time.Second))
 	if scanner2.Scan() {
 		msg := scanner2.Text()
 		if !strings.Contains(msg, "test/normal") {
 			t.Fatalf("Expected buffered normal message, got: %s", msg)
 		}
 		t.Log("Server 2 received buffered normal message successfully.")
+	} else {
+		t.Fatalf("Timeout or error reading normal message from server 2: %v", scanner2.Err())
 	}
 }
