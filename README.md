@@ -52,16 +52,3 @@ Configure your MCP client to use `mcpsocat` as the command:
 }
 ```
 
-## Features
-
-- **Single Binary**: No dependencies, making it easy to deploy in any environment.
-- **Automatic Reconnection**: Exponential backoff for reconnecting to dropped sockets.
-- **Transparent Session Recovery**: Caches and replays MCP initialization handshakes.
-- **Message Buffering**: Buffers client requests while the server is disconnected instead of crashing the client.
-- **Low Footprint**: Minimal memory and CPU usage.
-
-## How it works
-
-1. **Client to Server (`stdin` -> `socket`)**: Reads JSON-RPC messages from `stdin`. If it spots an `initialize` or `notifications/initialized` method, it saves them. All messages are forwarded to the socket. If disconnected, messages are queued.
-2. **Server to Client (`socket` -> `stdout`)**: Reads responses from the socket and writes them to `stdout`.
-3. **Reconnection**: When the socket breaks, `mcpsocat` attempts to reconnect. Once connected, it fires the saved `initialize` and `initialized` messages automatically. It drops the very first response from the server (which is the reply to the replayed `initialize`) to maintain protocol consistency with the client.
