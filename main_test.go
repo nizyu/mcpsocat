@@ -52,10 +52,12 @@ func TestProxySessionRecovery(t *testing.T) {
 		}
 	}()
 
-	// 少し待ってからプロキシに initialize を流し込む
+	// 少し待ってからプロキシに initialize と initialized を流し込む
 	time.Sleep(100 * time.Millisecond)
 	initMsg := `{"method": "initialize"}`
 	inWriter.Write([]byte(initMsg + "\n"))
+	initedMsg := `{"method": "notifications/initialized"}`
+	inWriter.Write([]byte(initedMsg + "\n"))
 
 	// サーバー1で接続とメッセージを確認
 	select {
@@ -63,10 +65,17 @@ func TestProxySessionRecovery(t *testing.T) {
 		scanner := bufio.NewScanner(conn)
 		if scanner.Scan() {
 			msg := scanner.Text()
-			if !strings.Contains(msg, "initialize") {
+			if !strings.Contains(msg, `"initialize"`) {
 				t.Fatalf("Expected initialize message, got: %s", msg)
 			}
 			t.Log("Server 1 received initialize successfully.")
+		}
+		if scanner.Scan() {
+			msg := scanner.Text()
+			if !strings.Contains(msg, "notifications/initialized") {
+				t.Fatalf("Expected initialized notification, got: %s", msg)
+			}
+			t.Log("Server 1 received initialized notification successfully.")
 		}
 		// サーバー1を意図的に落とす（ソケットを閉じる）
 		conn.Close()
@@ -100,7 +109,7 @@ func TestProxySessionRecovery(t *testing.T) {
 	// 最初に来るメッセージは、キャッシュされた initialize の再送のはず
 	if scanner2.Scan() {
 		msg := scanner2.Text()
-		if !strings.Contains(msg, "initialize") {
+		if !strings.Contains(msg, `"initialize"`) {
 			t.Fatalf("Expected re-sent initialize message, got: %s", msg)
 		}
 		t.Log("Server 2 received re-sent initialize successfully.")
@@ -108,7 +117,16 @@ func TestProxySessionRecovery(t *testing.T) {
 		conn2.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}` + "\n"))
 	}
 
-	// 次に来るメッセージは、切断中にバッファリングされていた normalMsg のはず
+	// 次に来るメッセージは、キャッシュされた initialized 通知の再送のはず
+	if scanner2.Scan() {
+		msg := scanner2.Text()
+		if !strings.Contains(msg, "notifications/initialized") {
+			t.Fatalf("Expected re-sent initialized notification, got: %s", msg)
+		}
+		t.Log("Server 2 received re-sent initialized notification successfully.")
+	}
+
+	// その次に来るメッセージは、切断中にバッファリングされていた normalMsg のはず
 	if scanner2.Scan() {
 		msg := scanner2.Text()
 		if !strings.Contains(msg, "test/normal") {
