@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,8 +10,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -59,11 +62,15 @@ func main() {
 	}
 	p.cond = sync.NewCond(&p.mu)
 
+	// シグナルハンドリング: SIGINT/SIGTERM で安全に終了する
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	// 1. 標準入力(Stdin)からの読み取りをバックグラウンドで開始
 	go p.readStdin()
 
 	// 2. サーバーへの接続と送受信ループを開始
-	p.connectToServer()
+	p.connectToServer(ctx)
 }
 
 // readStdin は入力(デフォルト標準入力)からメッセージを読み取り、状態のキャッシュや送信キューへの追加を行う
@@ -100,17 +107,29 @@ func (p *Proxy) readStdin() {
 }
 
 // connectToServer はソケットへの接続と再接続（指数バックオフ）を管理する
-func (p *Proxy) connectToServer() {
+func (p *Proxy) connectToServer(ctx context.Context) {
 	backoff := 1 * time.Second
 	const maxBackoff = 30 * time.Second
 
 	for {
+		select {
+		case <-ctx.Done():
+			log.Println("shutting down...")
+			return
+		default:
+		}
+
 		conn, err := net.Dial("unix", p.socketPath)
 		if err != nil {
 			p.mu.Lock()
 			p.isReconnecting = true
 			p.mu.Unlock()
-			time.Sleep(backoff)
+			select {
+			case <-ctx.Done():
+				log.Println("shutting down...")
+				return
+			case <-time.After(backoff):
+			}
 			// 指数バックオフ: 1s → 2s → 4s → ... → max 30s
 			backoff *= 2
 			if backoff > maxBackoff {
@@ -141,7 +160,12 @@ func (p *Proxy) connectToServer() {
 				p.mu.Lock()
 				p.isReconnecting = true
 				p.mu.Unlock()
-				time.Sleep(backoff)
+				select {
+				case <-ctx.Done():
+					log.Println("shutting down...")
+					return
+				case <-time.After(backoff):
+				}
 				backoff *= 2
 				if backoff > maxBackoff {
 					backoff = maxBackoff

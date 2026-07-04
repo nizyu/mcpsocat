@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"io"
 	"net"
 	"os"
@@ -34,7 +35,7 @@ func TestProxySessionRecovery(t *testing.T) {
 
 	// プロキシをバックグラウンドで起動
 	go p.readStdin()
-	go p.connectToServer()
+	go p.connectToServer(context.Background())
 
 	// 3. ダミーのサーバー1を立ち上げる
 	l1, err := net.Listen("unix", socketPath)
