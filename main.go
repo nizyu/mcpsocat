@@ -84,18 +84,28 @@ func (p *Proxy) readStdin() {
 	}
 }
 
-// connectToServer はソケットへの接続と再接続（バックオフ）を管理する
+// connectToServer はソケットへの接続と再接続（指数バックオフ）を管理する
 func (p *Proxy) connectToServer() {
+	backoff := 1 * time.Second
+	const maxBackoff = 30 * time.Second
+
 	for {
 		conn, err := net.Dial("unix", p.socketPath)
 		if err != nil {
 			p.mu.Lock()
 			p.isReconnecting = true
 			p.mu.Unlock()
-			// 接続に失敗した場合は1秒待機して再試行
-			time.Sleep(1 * time.Second)
+			time.Sleep(backoff)
+			// 指数バックオフ: 1s → 2s → 4s → ... → max 30s
+			backoff *= 2
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
 			continue
 		}
+
+		// 接続成功時はバックオフをリセット
+		backoff = 1 * time.Second
 
 		p.mu.Lock()
 		reconnecting := p.isReconnecting
@@ -113,7 +123,11 @@ func (p *Proxy) connectToServer() {
 				p.mu.Lock()
 				p.isReconnecting = true
 				p.mu.Unlock()
-				time.Sleep(1 * time.Second)
+				time.Sleep(backoff)
+				backoff *= 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
 				continue
 			}
 			// ハンドシェイクで再送済みの初期化メッセージをキューから除去する
