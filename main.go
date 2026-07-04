@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -26,6 +27,9 @@ type Proxy struct {
 
 	isFirstMsgAfterReconnect bool
 	isReconnecting           bool
+
+	in  io.Reader
+	out io.Writer
 }
 
 func main() {
@@ -36,6 +40,8 @@ func main() {
 
 	p := &Proxy{
 		socketPath: os.Args[1],
+		in:         os.Stdin,
+		out:        os.Stdout,
 	}
 	p.cond = sync.NewCond(&p.mu)
 
@@ -46,9 +52,9 @@ func main() {
 	p.connectToServer()
 }
 
-// readStdin は標準入力からメッセージを読み取り、状態のキャッシュや送信キューへの追加を行う
+// readStdin は入力(デフォルト標準入力)からメッセージを読み取り、状態のキャッシュや送信キューへの追加を行う
 func (p *Proxy) readStdin() {
-	scanner := bufio.NewScanner(os.Stdin)
+	scanner := bufio.NewScanner(p.in)
 	// MCPのペイロードは大きくなることがあるためバッファを拡張
 	buf := make([]byte, 1024*1024)
 	scanner.Buffer(buf, 10*1024*1024)
@@ -164,7 +170,7 @@ func (p *Proxy) handleConnection(conn net.Conn) {
 		}
 		p.mu.Unlock()
 
-		os.Stdout.Write([]byte(line + "\n"))
+		p.out.Write([]byte(line + "\n"))
 	}
 
 	// ソケットが切断された（EOF等）場合の終了処理
