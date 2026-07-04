@@ -103,6 +103,8 @@ func TestProxySessionRecovery(t *testing.T) {
 			t.Fatalf("Expected re-sent initialize message, got: %s", msg)
 		}
 		t.Log("Server 2 received re-sent initialize successfully.")
+		// initialize レスポンスを返す（プロキシがハンドシェイクを完了するために必要）
+		conn2.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}` + "\n"))
 	}
 
 	// 次に来るメッセージは、切断中にバッファリングされていた normalMsg のはず

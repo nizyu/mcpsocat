@@ -25,8 +25,7 @@ type Proxy struct {
 	mu              sync.Mutex
 	cond            *sync.Cond
 
-	isFirstMsgAfterReconnect bool
-	isReconnecting           bool
+	isReconnecting bool
 
 	in  io.Reader
 	out io.Writer
@@ -99,28 +98,70 @@ func (p *Proxy) connectToServer() {
 		}
 
 		p.mu.Lock()
-		if p.isReconnecting {
-			p.isFirstMsgAfterReconnect = true
-			// 再接続成功時、キャッシュされた初期化メッセージを未送信キューの先頭に積む
-			var newPending []string
-			if p.initRequest != "" {
-				newPending = append(newPending, p.initRequest)
-			}
-			if p.initNotification != "" {
-				newPending = append(newPending, p.initNotification)
-			}
-			p.pendingMessages = append(newPending, p.pendingMessages...)
-		}
+		reconnecting := p.isReconnecting
+		initReq := p.initRequest
+		initNotif := p.initNotification
 		p.isReconnecting = false
 		p.mu.Unlock()
 
+		reader := bufio.NewReaderSize(conn, 10*1024*1024)
+
+		// 再接続時はMCPの初期化ハンドシェイクを再実行する
+		if reconnecting {
+			if err := p.replayInitHandshake(conn, reader, initReq, initNotif); err != nil {
+				conn.Close()
+				p.mu.Lock()
+				p.isReconnecting = true
+				p.mu.Unlock()
+				time.Sleep(1 * time.Second)
+				continue
+			}
+			// ハンドシェイクで再送済みの初期化メッセージをキューから除去する
+			p.mu.Lock()
+			filtered := p.pendingMessages[:0]
+			for _, m := range p.pendingMessages {
+				var parsed MCPMessage
+				if err := json.Unmarshal([]byte(m), &parsed); err == nil {
+					if parsed.Method == "initialize" || parsed.Method == "notifications/initialized" {
+						continue
+					}
+				}
+				filtered = append(filtered, m)
+			}
+			p.pendingMessages = filtered
+			p.mu.Unlock()
+		}
+
 		// 接続が確立されている間の処理（切断されるまでブロックする）
-		p.handleConnection(conn)
+		p.handleConnection(conn, reader)
 	}
 }
 
+// replayInitHandshake は再接続時にMCPの初期化ハンドシェイクを順序通りに再実行する
+// initialize送信 → レスポンス受信（破棄） → initialized送信 の順序を保証する
+func (p *Proxy) replayInitHandshake(conn net.Conn, reader *bufio.Reader, initReq, initNotif string) error {
+	if initReq != "" {
+		// 1. キャッシュされた initialize リクエストを送信
+		if _, err := conn.Write([]byte(initReq + "\n")); err != nil {
+			return err
+		}
+		// 2. サーバーからの initialize レスポンスを読み取り、破棄する
+		//    （クライアントは既に初期化済みと認識しているため）
+		if _, err := reader.ReadString('\n'); err != nil {
+			return err
+		}
+	}
+	if initNotif != "" {
+		// 3. initialized 通知を送信（レスポンス受信後なので順序が保証される）
+		if _, err := conn.Write([]byte(initNotif + "\n")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // handleConnection は接続ごとの読み書きを行う
-func (p *Proxy) handleConnection(conn net.Conn) {
+func (p *Proxy) handleConnection(conn net.Conn, reader *bufio.Reader) {
 	writeDone := make(chan struct{})
 	var connClosed bool
 
@@ -154,22 +195,12 @@ func (p *Proxy) handleConnection(conn net.Conn) {
 	}()
 
 	// Reader Loop: サーバーからのレスポンスを標準出力に流す
-	scanner := bufio.NewScanner(conn)
-	buf := make([]byte, 1024*1024)
-	scanner.Buffer(buf, 10*1024*1024)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		p.mu.Lock()
-		if p.isFirstMsgAfterReconnect {
-			p.isFirstMsgAfterReconnect = false
-			p.mu.Unlock()
-			// 再接続後の最初のレスポンス（initializeへの応答）はエージェントには見せずに破棄する
-			continue
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			break
 		}
-		p.mu.Unlock()
-
+		line = strings.TrimRight(line, "\n\r")
 		p.out.Write([]byte(line + "\n"))
 	}
 
