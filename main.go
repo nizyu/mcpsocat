@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"strings"
@@ -32,13 +34,26 @@ type Proxy struct {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <socket_path>\n", os.Args[0])
+	quiet := flag.Bool("q", false, "suppress log output")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [-q] <socket_path>\n", os.Args[0])
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+
+	if flag.NArg() < 1 {
+		flag.Usage()
 		os.Exit(1)
 	}
 
+	log.SetPrefix("[mcpsocat] ")
+	log.SetFlags(log.Ltime)
+	if *quiet {
+		log.SetOutput(io.Discard)
+	}
+
 	p := &Proxy{
-		socketPath: os.Args[1],
+		socketPath: flag.Arg(0),
 		in:         os.Stdin,
 		out:        os.Stdout,
 	}
@@ -106,6 +121,7 @@ func (p *Proxy) connectToServer() {
 
 		// 接続成功時はバックオフをリセット
 		backoff = 1 * time.Second
+		log.Printf("connected to %s", p.socketPath)
 
 		p.mu.Lock()
 		reconnecting := p.isReconnecting
@@ -118,7 +134,9 @@ func (p *Proxy) connectToServer() {
 
 		// 再接続時はMCPの初期化ハンドシェイクを再実行する
 		if reconnecting {
+			log.Println("replaying init handshake...")
 			if err := p.replayInitHandshake(conn, reader, initReq, initNotif); err != nil {
+				log.Printf("handshake failed: %v, retrying...", err)
 				conn.Close()
 				p.mu.Lock()
 				p.isReconnecting = true
@@ -144,6 +162,7 @@ func (p *Proxy) connectToServer() {
 			}
 			p.pendingMessages = filtered
 			p.mu.Unlock()
+			log.Println("session recovered successfully")
 		}
 
 		// 接続が確立されている間の処理（切断されるまでブロックする）
@@ -220,6 +239,7 @@ func (p *Proxy) handleConnection(conn net.Conn, reader *bufio.Reader) {
 
 	// ソケットが切断された（EOF等）場合の終了処理
 	conn.Close()
+	log.Println("connection lost, reconnecting...")
 
 	p.mu.Lock()
 	connClosed = true
