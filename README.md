@@ -34,7 +34,7 @@ go install github.com/nizyu/mcpsocat@latest
 Simply replace your `socat` command with `mcpsocat`, passing the path to the UNIX domain socket.
 
 ```bash
-mcpsocat /path/to/.effect-broker.sock
+mcpsocat /path/to/my-mcp-server.sock
 ```
 
 ### In a client configuration (e.g., Claude Desktop, Cursor, Custom Agent)
@@ -46,7 +46,7 @@ Configure your MCP client to use `mcpsocat` as the command:
   "mcpServers": {
     "my-host-server": {
       "command": "mcpsocat",
-      "args": ["/path/to/.effect-broker.sock"]
+      "args": ["/path/to/my-mcp-server.sock"]
     }
   }
 }
