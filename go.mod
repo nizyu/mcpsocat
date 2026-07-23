@@ -1,3 +1,3 @@
 module github.com/nizyu/mcpsocat
 
-go 1.25
+go 1.26.4
