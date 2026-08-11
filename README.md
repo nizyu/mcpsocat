@@ -52,3 +52,10 @@ Configure your MCP client to use `mcpsocat` as the command:
 }
 ```
 
+### Running Tests
+
+Run unit tests with:
+
+```bash
+go test ./...
+```

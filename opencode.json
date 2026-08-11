@@ -1,0 +1,41 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "bedrock-mantle-chat/openai.gpt-oss-120b",
+  "provider": {
+    "bedrock-mantle-chat": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Amazon Bedrock Mantle Chat Completions",
+      "options": {
+        "baseURL": "https://bedrock-mantle.us-east-1.api.aws/v1",
+        "apiKey": "{env:AWS_BEARER_TOKEN_BEDROCK}"
+      },
+      "models": {
+        "openai.gpt-oss-120b": {
+          "name": "GPT-OSS 120B"
+        },
+        "openai.gpt-oss-20b": {
+          "name": "GPT-OSS 20B"
+        },
+        "deepseek.v3.2": {
+          "name": "DeepSeek V3.2"
+        },
+        "qwen.qwen3-coder-next": {
+          "name": "Qwen3 Coder Next"
+        }
+      }
+    }
+  },
+  "permission": {
+    "*": "allow"
+  },
+  "mcp": {
+    "github": {
+      "type": "remote",
+      "url": "https://api.githubcopilot.com/mcp/",
+      "headers": {
+        "Authorization": "Bearer {env:GITHUB_TOKEN}"
+      },
+      "enabled": true
+    }
+  }
+}

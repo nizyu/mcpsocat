@@ -21,6 +21,7 @@ type MCPMessage struct {
 	Method string `json:"method,omitempty"`
 }
 
+// Proxy は stdio と UNIX ソケットの間でメッセージを中継し、接続が失われた際に再接続とハンドシェイク再送を自動化します。
 type Proxy struct {
 	socketPath       string
 	initRequest      string
@@ -36,10 +37,22 @@ type Proxy struct {
 	out io.Writer
 }
 
+// NewProxy は必要なフィールドを初期化し、条件変数をセットアップした Proxy を返します。
+func NewProxy(socketPath string, in io.Reader, out io.Writer) *Proxy {
+	p := &Proxy{
+		socketPath: socketPath,
+		in:         in,
+		out:        out,
+	}
+	p.cond = sync.NewCond(&p.mu)
+	return p
+}
+
 func main() {
+	// プログラムエントリポイント。引数で UNIX ソケットパスを受け取り、Proxy を初期化して接続開始します。
 	quiet := flag.Bool("q", false, "suppress log output")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [-q] <socket_path>\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s [-q] <socket_path>\\n", os.Args[0])
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -55,12 +68,7 @@ func main() {
 		log.SetOutput(io.Discard)
 	}
 
-	p := &Proxy{
-		socketPath: flag.Arg(0),
-		in:         os.Stdin,
-		out:        os.Stdout,
-	}
-	p.cond = sync.NewCond(&p.mu)
+	p := NewProxy(flag.Arg(0), os.Stdin, os.Stdout)
 
 	// シグナルハンドリング: SIGINT/SIGTERM で安全に終了する
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -119,6 +127,7 @@ func (p *Proxy) connectToServer(ctx context.Context) {
 		default:
 		}
 
+		// NOTE: 接続失敗時に pendingMessages は残ります。再接続中にバッファされることを期待しています。
 		conn, err := net.Dial("unix", p.socketPath)
 		if err != nil {
 			p.mu.Lock()
@@ -131,9 +140,12 @@ func (p *Proxy) connectToServer(ctx context.Context) {
 			case <-time.After(backoff):
 			}
 			// 指数バックオフ: 1s → 2s → 4s → ... → max 30s
-			backoff *= 2
-			if backoff > maxBackoff {
-				backoff = maxBackoff
+			// maxBackoff を超えたら増加させずに上限で止める
+			if backoff < maxBackoff {
+				backoff *= 2
+				if backoff > maxBackoff {
+					backoff = maxBackoff
+				}
 			}
 			continue
 		}
@@ -166,9 +178,11 @@ func (p *Proxy) connectToServer(ctx context.Context) {
 					return
 				case <-time.After(backoff):
 				}
-				backoff *= 2
-				if backoff > maxBackoff {
-					backoff = maxBackoff
+				if backoff < maxBackoff {
+					backoff *= 2
+					if backoff > maxBackoff {
+						backoff = maxBackoff
+					}
 				}
 				continue
 			}
@@ -228,6 +242,7 @@ func (p *Proxy) handleConnection(conn net.Conn, reader *bufio.Reader) {
 		for {
 			p.mu.Lock()
 			for len(p.pendingMessages) == 0 && !connClosed {
+				// Condition 変数はロック保持したまま Wait すべき（内部でロック解放/再取得）
 				p.cond.Wait()
 			}
 			if connClosed {
@@ -255,6 +270,7 @@ func (p *Proxy) handleConnection(conn net.Conn, reader *bufio.Reader) {
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
+			log.Printf("read error: %v", err)
 			break
 		}
 		line = strings.TrimRight(line, "\n\r")
