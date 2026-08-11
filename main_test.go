@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -26,12 +25,7 @@ func TestProxySessionRecovery(t *testing.T) {
 	inReader, inWriter := io.Pipe()
 	outWriter := io.Discard // テストでは出力を厳密に検証しないので読み捨てでOK
 
-	p := &Proxy{
-		socketPath: socketPath,
-		in:         inReader,
-		out:        outWriter,
-	}
-	p.cond = sync.NewCond(&p.mu)
+	p := NewProxy(socketPath, inReader, outWriter)
 
 	// プロキシをバックグラウンドで起動
 	go p.readStdin()
